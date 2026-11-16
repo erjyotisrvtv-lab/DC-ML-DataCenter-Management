@@ -1,0 +1,13 @@
+router,normal_test,synthetic_test,tp,fn,fp,tn,precision,recall,false_positive_rate,test_type
+DC1-LEAF1,75,75,75,0,5,70,0.938,1.0,0.067,OFFLINE SYNTHETIC cpu_percent>=95; NOT real fault labels
+DC1-LEAF2,75,75,75,0,3,72,0.962,1.0,0.04,OFFLINE SYNTHETIC cpu_percent>=95; NOT real fault labels
+DC1-SPINE1,75,75,75,0,8,67,0.904,1.0,0.107,OFFLINE SYNTHETIC cpu_percent>=95; NOT real fault labels
+DC1-SPINE2,75,75,75,0,4,71,0.949,1.0,0.053,OFFLINE SYNTHETIC cpu_percent>=95; NOT real fault labels
+DC2-LEAF1,75,75,75,0,2,73,0.974,1.0,0.027,OFFLINE SYNTHETIC cpu_percent>=95; NOT real fault labels
+DC2-LEAF2,75,75,75,0,2,73,0.974,1.0,0.027,OFFLINE SYNTHETIC cpu_percent>=95; NOT real fault labels
+DC2-SPINE1,75,75,75,0,4,71,0.949,1.0,0.053,OFFLINE SYNTHETIC cpu_percent>=95; NOT real fault labels
+DC2-SPINE2,75,75,75,0,3,72,0.962,1.0,0.04,OFFLINE SYNTHETIC cpu_percent>=95; NOT real fault labels
+DC3-LEAF1,75,75,75,0,9,66,0.893,1.0,0.12,OFFLINE SYNTHETIC cpu_percent>=95; NOT real fault labels
+DC3-LEAF2,75,75,75,0,13,62,0.852,1.0,0.173,OFFLINE SYNTHETIC cpu_percent>=95; NOT real fault labels
+DC3-SPINE1,75,75,75,0,7,68,0.915,1.0,0.093,OFFLINE SYNTHETIC cpu_percent>=95; NOT real fault labels
+DC3-SPINE2,75,75,75,0,8,67,0.904,1.0,0.107,OFFLINE SYNTHETIC cpu_percent>=95; NOT real fault labels

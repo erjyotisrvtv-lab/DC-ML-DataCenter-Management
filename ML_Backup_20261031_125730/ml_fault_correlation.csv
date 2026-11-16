@@ -1,0 +1,13 @@
+router,correlation,ml_status,monitored_down,unknown_interfaces,failed_interfaces,nonhealthy_observed_routing,recommendation
+DC1-SPINE1,UNVERIFIED,Normal,0,3,,,Interface baseline/observations missing or stale
+DC1-SPINE2,UNVERIFIED,Normal,0,3,,,Interface baseline/observations missing or stale
+DC1-LEAF1,UNVERIFIED,Normal,0,3,,,Interface baseline/observations missing or stale
+DC1-LEAF2,UNVERIFIED,Normal,0,3,,,Interface baseline/observations missing or stale
+DC2-SPINE1,UNVERIFIED,Normal,0,4,,,Interface baseline/observations missing or stale
+DC2-SPINE2,UNVERIFIED,Normal,0,3,,,Interface baseline/observations missing or stale
+DC2-LEAF1,ML_ONLY,Anomaly,0,3,,,Inspect resource/traffic pattern; check other telemetry
+DC2-LEAF2,UNVERIFIED,Normal,0,3,,,Interface baseline/observations missing or stale
+DC3-SPINE1,UNVERIFIED,Normal,0,4,,,Interface baseline/observations missing or stale
+DC3-SPINE2,UNVERIFIED,Normal,0,3,,,Interface baseline/observations missing or stale
+DC3-LEAF1,UNVERIFIED,Normal,0,3,,,Interface baseline/observations missing or stale
+DC3-LEAF2,UNVERIFIED,Normal,0,3,,,Interface baseline/observations missing or stale

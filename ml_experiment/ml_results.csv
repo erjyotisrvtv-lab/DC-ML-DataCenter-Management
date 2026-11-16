@@ -1,0 +1,13 @@
+timestamp,router,anomaly_score,samples_used,model_scope,evaluated_at,cpu_percent,memory_percent,input_kbps,output_kbps,anomaly_status,anomaly_reason,features_used
+2026-10-14T23:58:57,DC1-SPINE1,0.108551,219,per-router,2026-10-18T14:39:55,11.0,7.49,,,Normal,No anomaly flagged,"cpu_percent, memory_percent"
+2026-10-14T23:58:58,DC1-SPINE2,-0.005026,219,per-router,2026-10-18T14:39:55,9.0,7.49,,,Anomaly,"Largest relative deviation: cpu_percent=9.000 (baseline median 2.000); indicative, not causal proof","cpu_percent, memory_percent"
+2026-10-14T23:58:54,DC1-LEAF1,-0.156053,217,per-router,2026-10-18T14:39:55,8.0,7.49,,,Anomaly,"Largest relative deviation: cpu_percent=8.000 (baseline median 2.000); indicative, not causal proof","cpu_percent, memory_percent"
+2026-10-14T23:58:55,DC1-LEAF2,-0.181989,218,per-router,2026-10-18T14:39:55,10.0,7.5,,,Anomaly,"Largest relative deviation: memory_percent=7.500 (baseline median 7.480); indicative, not causal proof","cpu_percent, memory_percent"
+2026-10-18T14:39:55,DC2-SPINE1,,0,none,2026-10-18T14:39:55,,,,,NO_DATA,No metric samples,
+2026-10-18T14:39:55,DC2-SPINE2,,0,none,2026-10-18T14:39:55,,,,,NO_DATA,No metric samples,
+2026-10-18T14:39:55,DC2-LEAF1,,0,none,2026-10-18T14:39:55,,,,,NO_DATA,No metric samples,
+2026-10-18T14:39:55,DC2-LEAF2,,0,none,2026-10-18T14:39:55,,,,,NO_DATA,No metric samples,
+2026-10-18T14:39:55,DC3-SPINE1,,0,none,2026-10-18T14:39:55,,,,,NO_DATA,No metric samples,
+2026-10-18T14:39:55,DC3-SPINE2,,0,none,2026-10-18T14:39:55,,,,,NO_DATA,No metric samples,
+2026-10-18T14:39:55,DC3-LEAF1,,0,none,2026-10-18T14:39:55,,,,,NO_DATA,No metric samples,
+2026-10-18T14:39:55,DC3-LEAF2,,0,none,2026-10-18T14:39:55,,,,,NO_DATA,No metric samples,

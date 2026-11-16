@@ -1,0 +1,5 @@
+router,valid_samples,anomalies
+LEAF1,225,15
+LEAF2,224,18
+SPINE1,224,16
+SPINE2,224,18

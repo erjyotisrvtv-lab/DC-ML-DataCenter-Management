@@ -1,0 +1,4 @@
+dc,risk_score,ml_anomalies,down_links,ml_unknown,unverified_routers,interpretation
+DC1,0,0,0,0,0,"Heuristic triage score, not failure probability"
+DC2,0,0,0,0,0,"Heuristic triage score, not failure probability"
+DC3,0,0,0,0,0,"Heuristic triage score, not failure probability"

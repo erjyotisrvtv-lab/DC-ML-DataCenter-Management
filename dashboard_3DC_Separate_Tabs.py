@@ -1,0 +1,1072 @@
+"""Executive multi-data-center operations dashboard. Run: streamlit run dashboard_3DC_executive.py"""
+from pathlib import Path
+import time
+import pandas as pd
+
+def safe_read_wan_csv(path):
+    from pathlib import Path
+    from pandas.errors import EmptyDataError
+
+    path = Path(path)
+
+    if not path.exists():
+        return pd.DataFrame()
+
+    if path.stat().st_size == 0:
+        return pd.DataFrame()
+
+    try:
+        return pd.read_csv(
+            path,
+            on_bad_lines="skip"
+        )
+
+    except (
+        EmptyDataError,
+        OSError,
+        ValueError,
+        pd.errors.ParserError
+    ):
+        return pd.DataFrame()
+
+
+import plotly.express as px
+import plotly.graph_objects as go
+import streamlit as st
+
+st.set_page_config(page_title='Machine Learning based Distributed Cloud Data Center Management', page_icon='🌈', layout='wide')
+ROOT = Path(__file__).resolve().parent
+ROUTERS = {f'DC{d}-{role}{i}' for d in (1, 2, 3) for role in ('SPINE', 'LEAF') for i in (1, 2)}
+LEGACY = {'LEAF1':'DC1-LEAF1','LEAF2':'DC1-LEAF2','SPINE1':'DC1-SPINE1','SPINE2':'DC1-SPINE2'}
+COLORS = {'DC1':'#38bdf8','DC2':'#a78bfa','DC3':'#34d399'}
+RAINBOW = ['#38bdf8','#a78bfa','#34d399','#fb7185','#fbbf24','#22d3ee','#f472b6','#c4b5fd','#86efac','#fdba74','#60a5fa','#e879f9']
+def style_plot(fig):
+    fig.update_layout(paper_bgcolor='#142139',plot_bgcolor='#142139',font=dict(color='#e8f1ff'),height=340,
+                      margin=dict(l=45,r=18,t=50,b=55),legend=dict(orientation='h',y=-0.27,x=0,title_text=''),
+                      title_font=dict(size=16,color='#e8f1ff'),hovermode='x unified')
+    fig.update_xaxes(gridcolor='#30415c',zerolinecolor='#30415c')
+    fig.update_yaxes(gridcolor='#30415c',zerolinecolor='#30415c')
+    return fig
+st.markdown("""<style>
+.stApp{background:radial-gradient(ellipse at 90% 0%,#19254a 0%,#0b1220 42%,#080d18 100%);color:#e2e8f0}
+.stApp:before{content:'';position:fixed;top:0;left:0;right:0;height:5px;z-index:9999;background:linear-gradient(90deg,#ff4569,#ffab43,#f7db56,#32d399,#24c6ff,#8165ff,#d954ef)}
+[data-testid="stSidebar"]{background:#101a2c;border-right:1px solid #2a3b53}
+[data-testid="stMetric"]{background:linear-gradient(135deg,#182943,#142139);border:1px solid #34445f;border-radius:16px;padding:16px;box-shadow:0 10px 22px #0004;min-height:120px}
+[data-testid="stMetricLabel"]{color:#bdd0e8!important;font-weight:600}
+[data-testid="stMetricValue"]{color:#ffffff!important;font-weight:800}
+[data-testid="stHorizontalBlock"]:has([data-testid="stMetric"]) > div:nth-child(5n+1) [data-testid="stMetric"]{border-top:4px solid #ff5d78}
+[data-testid="stHorizontalBlock"]:has([data-testid="stMetric"]) > div:nth-child(5n+2) [data-testid="stMetric"]{border-top:4px solid #a88bff}
+[data-testid="stHorizontalBlock"]:has([data-testid="stMetric"]) > div:nth-child(5n+3) [data-testid="stMetric"]{border-top:4px solid #32d6e9}
+[data-testid="stHorizontalBlock"]:has([data-testid="stMetric"]) > div:nth-child(5n+4) [data-testid="stMetric"]{border-top:4px solid #f5c85d}
+[data-testid="stHorizontalBlock"]:has([data-testid="stMetric"]) > div:nth-child(5n+5) [data-testid="stMetric"]{border-top:4px solid #45dc9b}
+h1{background:linear-gradient(90deg,#60d6ff,#a994ff,#ff7aab);background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent;font-weight:850!important}
+h2,h3{color:#eaf4ff!important}
+.block-container{padding-top:1.3rem;max-width:1720px}
+html,body,[class*=css]{font-size:16px}
+[data-testid='stMetricValue']{font-size:1.65rem!important}
+[data-testid='stMetricLabel']{font-size:.92rem!important}
+[data-testid='stMarkdownContainer'] p{line-height:1.55}
+[data-testid='stPlotlyChart']{border:1px solid #304660;border-radius:14px;overflow:hidden}
+[data-testid="stDataFrame"]{border:1px solid #304660;border-radius:13px}
+.stButton button{background:linear-gradient(95deg,#2660a5,#7045b9);color:white;border:1px solid #6d91d2;border-radius:10px}
+[data-testid="stAlert"]{border-radius:12px}
+[data-testid="stProgressBar"]>div>div{background:linear-gradient(90deg,#26bff2,#8d72ff,#39d69b)!important}
+.rainbow-panel{padding:14px 20px;background:linear-gradient(110deg,#192b47,#202146 48%,#182f3c);border:1px solid #3b4c70;border-radius:15px;margin:4px 0 18px}
+.rainbow-panel small{color:#b5c8e0;letter-spacing:.11em;font-weight:650}
+.rainbow-panel p{margin:7px 0 0;color:#d4e3f6}
+</style>""", unsafe_allow_html=True)
+
+@st.cache_data(ttl=10)
+def load_metrics(include_archive):
+    paths = [ROOT/'dc_metrics.csv']
+    if include_archive and (ROOT/'archive').exists():
+        paths += sorted((ROOT/'archive').glob('*.csv'))
+    frames = []
+    needed = {'timestamp','router','cpu_percent','memory_percent','input_bytes','output_bytes'}
+    for path in paths:
+        if not path.exists():
+            continue
+        try:
+            frame = pd.read_csv(path, on_bad_lines='skip')
+            if needed.issubset(frame.columns):
+                frames.append(frame[list(needed)].copy())
+        except (OSError, ValueError, pd.errors.ParserError, pd.errors.EmptyDataError):
+            continue
+    if not frames:
+        return pd.DataFrame(columns=sorted(needed))
+    df = pd.concat(frames, ignore_index=True)
+    df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+    df['router'] = df['router'].astype(str).str.strip().str.upper().replace(LEGACY)
+    for field in ('cpu_percent','memory_percent','input_bytes','output_bytes'):
+        df[field] = pd.to_numeric(df[field], errors='coerce')
+    df = df[df['router'].isin(ROUTERS)].dropna(subset=['timestamp']).copy()
+    df['data_center'] = df['router'].str.extract(r'^(DC[123])-')
+    df = df[df['timestamp'] <= pd.Timestamp.now() + pd.Timedelta(minutes=5)]
+    for f in ('cpu_percent','memory_percent'):
+        df.loc[~df[f].between(0,100),f] = float('nan')
+    return df.drop_duplicates(subset=['router','timestamp'],keep='last').sort_values(['router','timestamp'])
+
+@st.cache_data(ttl=10)
+def load_optional(name):
+    path = ROOT/name
+    if not path.exists():
+        return pd.DataFrame()
+    try:
+        df = pd.read_csv(path, on_bad_lines='skip')
+        if 'router' in df:
+            df['router'] = df['router'].astype(str).str.strip().str.upper().replace(LEGACY)
+        if 'timestamp' in df:
+            df['timestamp'] = pd.to_datetime(df['timestamp'],errors='coerce')
+        return df
+    except (OSError,ValueError,pd.errors.ParserError,pd.errors.EmptyDataError):
+        return pd.DataFrame()
+
+with st.sidebar:
+    st.markdown('### 🌈 Command Center Controls')
+    dc = st.selectbox('Data Center', ['ALL','DC1','DC2','DC3'])
+    include_archive = st.checkbox('Include archived readings', value=False)
+    refresh = st.checkbox('Auto-refresh (30 sec)',value=True)
+    history_limit = st.selectbox('Trend period', ['Last 30 minutes','Last 2 hours','Last 24 hours','All available'], index=0)
+    if st.button('Refresh now',width="stretch"):
+        st.cache_data.clear()
+        st.rerun()
+    st.caption('Read-only dashboard. Data collector and ML analysis run separately. CPU and Memory panels are always visible.')
+
+st.title('🧠 Machine Learning based Distributed Cloud Data Center Management')
+st.markdown('''<div class="rainbow-panel"><small>EXECUTIVE OPERATIONS INTELLIGENCE · EVE-NG LAB</small><p>Three Data Centers &nbsp;•&nbsp; 12 Cisco Nodes &nbsp;•&nbsp; Capacity &amp; Traffic &nbsp;•&nbsp; ML Anomaly Insights &nbsp;•&nbsp; OSPF / BGP Routing Health</p></div>''', unsafe_allow_html=True)
+
+# ==========================================================
+# TOP-LEVEL DASHBOARD NAVIGATION
+# ==========================================================
+
+tab_infra, tab_ml, tab_wan = st.tabs([
+    "🌐 Infrastructure Monitoring",
+    "🧠 AI / ML Intelligence",
+    "🌍 WAN BGP & ML Correlation"
+])
+
+
+with tab_infra:
+
+    # ==========================================================
+    # DUAL ISP MONITORING - ISP-1 AND ISP-2
+    # ==========================================================
+
+    st.divider()
+    st.header("🌐 Dual ISP Monitoring | ISP-1 & ISP-2")
+
+    @st.cache_data(ttl=10)
+    def load_wan_metrics():
+        path = ROOT / "dc_metrics.csv"
+
+        if not path.exists():
+            return pd.DataFrame()
+
+        df = safe_read_wan_csv(path)
+
+        required = [
+            "timestamp", "router",
+            "cpu_percent", "memory_percent",
+            "input_bytes", "output_bytes"
+        ]
+
+        if not set(required).issubset(df.columns):
+            return pd.DataFrame()
+
+        df["router"] = (
+            df["router"].astype(str).str.strip().str.upper()
+        )
+
+        df = df[df["router"].isin(["ISP-1", "ISP-2"])].copy()
+
+        if df.empty:
+            return df
+
+        df["timestamp"] = pd.to_datetime(
+            df["timestamp"], errors="coerce"
+        )
+
+        for col in required[2:]:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        return df.dropna(subset=["timestamp"]).sort_values("timestamp")
+
+
+    wan = load_wan_metrics()
+
+    col1, col2 = st.columns(2)
+
+    for col, name, role in [
+        (col1, "ISP-1", "Primary WAN | AS65000"),
+        (col2, "ISP-2", "Backup WAN | AS65100")
+    ]:
+        with col:
+            st.subheader(f"🌍 {name}")
+            st.caption(role)
+
+            device = (
+                wan[wan["router"] == name]
+                if not wan.empty else pd.DataFrame()
+            )
+
+            if device.empty:
+                st.warning("No telemetry collected yet")
+                st.metric("CPU", "N/A")
+                st.metric("Memory", "N/A")
+            else:
+                latest_isp = device.iloc[-1]
+
+                age = pd.Timestamp.now() - latest_isp["timestamp"]
+                fresh = (
+                    pd.Timedelta(0)
+                    <= age <= pd.Timedelta(minutes=5)
+                )
+
+                st.metric(
+                    "Telemetry",
+                    "CURRENT" if fresh else "STALE"
+                )
+
+                a, b = st.columns(2)
+
+                a.metric(
+                    "CPU",
+                    f"{latest_isp['cpu_percent']:.2f}%"
+                    if pd.notna(latest_isp["cpu_percent"])
+                    else "N/A"
+                )
+
+                b.metric(
+                    "Memory",
+                    f"{latest_isp['memory_percent']:.2f}%"
+                    if pd.notna(latest_isp["memory_percent"])
+                    else "N/A"
+                )
+
+                st.caption(
+                    f"Last reading: {latest_isp['timestamp']}"
+                )
+
+    if not wan.empty:
+        st.subheader("📊 ISP CPU Utilization")
+
+        fig = px.line(
+            wan,
+            x="timestamp",
+            y="cpu_percent",
+            color="router",
+            title="ISP-1 vs ISP-2 CPU"
+        )
+
+        st.plotly_chart(
+            style_plot(fig),
+            width="stretch"
+        )
+
+        st.subheader("📊 ISP Memory Utilization")
+
+        fig2 = px.line(
+            wan,
+            x="timestamp",
+            y="memory_percent",
+            color="router",
+            title="ISP-1 vs ISP-2 Memory"
+        )
+
+        st.plotly_chart(
+            style_plot(fig2),
+            width="stretch"
+        )
+
+    st.caption(
+        "ISP status is based on collected telemetry. "
+        "BGP availability requires separate routing observations."
+    )
+
+    # ==========================================================
+    # END DUAL ISP MONITORING
+    # ==========================================================
+    metrics = load_metrics(include_archive)
+    if metrics.empty:
+        st.error('No valid monitoring readings found. Put this file beside dc_metrics.csv and run multi_collector.py.')
+        st.stop()
+    scoped = metrics if dc == 'ALL' else metrics[metrics['data_center']==dc]
+    router_names = sorted(scoped['router'].unique())
+    router = st.sidebar.selectbox('Router', ['ALL'] + router_names)
+    selected = scoped if router == 'ALL' else scoped[scoped['router']==router]
+    if selected.empty:
+        st.warning('No readings for this selection.')
+        st.stop()
+    latest = selected.sort_values('timestamp').groupby('router').tail(1)
+    latest_time = latest['timestamp'].max()
+    now = pd.Timestamp.now()
+    age = now - latest_time
+    fresh = pd.notna(age) and pd.Timedelta(0) <= age <= pd.Timedelta(minutes=5)
+    if not fresh:
+        st.warning(f'Stale or future-dated readings: latest sample {latest_time:%Y-%m-%d %H:%M:%S}. Check collector and host clock.')
+
+    n1,n2,n3,n4,n5 = st.columns(5)
+    n1.metric('Routers with data',f'{latest["router"].nunique()} / {4 if dc != "ALL" else 12}')
+    n2.metric('Avg CPU',f'{latest["cpu_percent"].mean():.2f}%' if latest['cpu_percent'].notna().any() else 'N/A')
+    n3.metric('Avg Memory',f'{latest["memory_percent"].mean():.2f}%' if latest['memory_percent'].notna().any() else 'N/A')
+    n4.metric('Latest sample',latest_time.strftime('%H:%M:%S'))
+    n5.metric('Data freshness','Current' if fresh else 'Stale')
+    st.caption('KPI scope: latest stored sample per router in the selected DC/router scope. Node count is data coverage, not uptime.')
+
+    # PHASE 1 — management-friendly executive performance summary.
+    st.markdown('#### 🎯 Executive Performance Scorecard')
+    site_latest = (metrics.sort_values('timestamp').groupby('router').tail(1))
+    site_latest = site_latest if dc == 'ALL' else site_latest[site_latest['data_center'] == dc]
+    valid_cpu = site_latest['cpu_percent'].dropna()
+    valid_mem = site_latest['memory_percent'].dropna()
+    sc1,sc2,sc3,sc4 = st.columns(4)
+    sc1.metric('Peak CPU · latest samples', f'{valid_cpu.max():.2f}%' if not valid_cpu.empty else 'N/A')
+    sc2.metric('Peak Memory · latest samples', f'{valid_mem.max():.2f}%' if not valid_mem.empty else 'N/A')
+    sc3.metric('Fresh nodes (≤5 min)', f'{int(((pd.Timestamp.now() - site_latest["timestamp"]).between(pd.Timedelta(0), pd.Timedelta(minutes=5))).sum())} / {len(site_latest)}')
+    sc4.metric('Sites with collected data', str(site_latest['data_center'].nunique()))
+    st.caption('Peak = maximum of latest router samples (not historical peak). Fresh = reading within 5 minutes of host clock; no uptime/SLA claim.')
+
+    st.subheader('🏢 Data Center Performance Overview')
+    summary = (scoped.sort_values('timestamp').groupby('router').tail(1)
+               .groupby('data_center').agg(routers=('router','nunique'),cpu=('cpu_percent','mean'),memory=('memory_percent','mean')).reset_index())
+    cols = st.columns(3)
+    for i, dcname in enumerate(['DC1','DC2','DC3']):
+        record = summary[summary['data_center']==dcname]
+        with cols[i]:
+            if not record.empty:
+                r = record.iloc[0]
+                st.markdown(f'**{dcname}** · {int(r["routers"])} routers with data')
+                st.progress(min(1.,max(0.,float(r['cpu'])/100)) if pd.notna(r['cpu']) else 0.,text=f'CPU {r["cpu"]:.2f}%')
+                st.progress(min(1.,max(0.,float(r['memory'])/100)) if pd.notna(r['memory']) else 0.,text=f'Memory {r["memory"]:.2f}%')
+            else:
+                st.markdown(f'**{dcname}** · No readings in selection')
+
+    # Always-visible executive charts directly under the three DC performance cards.
+    st.markdown('#### 📊 Latest Data Center CPU & Memory Comparison')
+    st.caption('Latest recorded average per router, grouped by data center (check freshness indicator above). These are observed utilization values, not alert thresholds.')
+    latest_per_router = scoped.sort_values('timestamp').groupby('router', as_index=False).tail(1)
+    executive_dc = (latest_per_router.groupby('data_center', as_index=False)
+                    .agg(cpu=('cpu_percent','mean'), memory=('memory_percent','mean'),
+                         routers=('router','nunique')))
+    executive_dc = executive_dc.set_index('data_center').reindex(['DC1','DC2','DC3']).reset_index()
+
+    def executive_bar(field, label, color):
+        values = executive_dc.dropna(subset=[field])
+        if values.empty:
+            st.info(f'No {label} samples available.')
+            return
+        fig = go.Figure(go.Bar(
+            x=values['data_center'], y=values[field],
+            marker=dict(color=color, line=dict(color='rgba(255,255,255,0.2)', width=1)),
+            text=[f'{v:.2f}%' for v in values[field]], textposition='outside',
+            hovertemplate='<b>%{x}</b><br>'+label+': %{y:.2f}%<extra></extra>',
+            width=0.52))
+        ymax = max(12., float(values[field].max()) * 1.4)
+        fig.update_layout(title=f'{label} by Data Center', xaxis_title='',
+                          yaxis_title='Utilization (%)', height=295,
+                          showlegend=False, margin=dict(t=55,b=25,l=35,r=15),
+                          bargap=.40)
+        fig.update_yaxes(range=[0, min(100., ymax)], ticksuffix='%')
+        st.plotly_chart(style_plot(fig), width="stretch")
+
+    exec_cpu, exec_mem = st.columns(2, gap='medium')
+    with exec_cpu:
+        executive_bar('cpu', 'CPU', '#38bdf8')
+    with exec_mem:
+        executive_bar('memory', 'Memory', '#a78bfa')
+    st.caption('Blue = CPU, Purple = Memory. Both bars use latest sample per router. Historical trends below use the selected time window.')
+
+    # Use a common latest timestamp for scope, but do not join disconnected collection sessions.
+    periods = {'Last 30 minutes': pd.Timedelta(minutes=30),
+               'Last 2 hours': pd.Timedelta(hours=2),
+               'Last 24 hours': pd.Timedelta(hours=24)}
+    trend_scope = scoped.copy()
+    if history_limit in periods:
+        cutoff = trend_scope['timestamp'].max() - periods[history_limit]
+        trend_scope = trend_scope[trend_scope['timestamp'] >= cutoff]
+
+    # Segment series when there is a large polling gap. Plotly must not draw a line
+    # from an old session to a new session, which can look like a false spike/drop.
+    def add_gaps(df, group_col, time_col, fields, expected_seconds=30):
+        parts=[]
+        for _,g in df.groupby(group_col,sort=False):
+            g=g.sort_values(time_col).copy()
+            gaps=g[time_col].diff().dt.total_seconds().gt(max(180,expected_seconds*5))
+            if gaps.any():
+                extras=g.loc[gaps].copy()
+                extras[time_col]=extras[time_col]-pd.Timedelta(microseconds=1)
+                for f in fields: extras[f]=float('nan')
+                g=pd.concat([g,extras],ignore_index=True)
+            parts.append(g)
+        return pd.concat(parts,ignore_index=True).sort_values([group_col,time_col]) if parts else df
+
+    st.subheader('📊 Performance Analytics | CPU & Memory')
+    st.caption(f'CPU and Memory side-by-side · Window: {history_limit} · Gaps between polling sessions are not joined.')
+    by_dc = trend_scope.copy()
+    by_dc['minute'] = by_dc['timestamp'].dt.floor('min')
+    by_dc = by_dc.groupby(['minute','data_center'], as_index=False)[['cpu_percent','memory_percent']].mean()
+    by_dc = add_gaps(by_dc,'data_center','minute',['cpu_percent','memory_percent'])
+
+    def dc_trend(field, title, axis):
+        if by_dc.empty or by_dc[field].notna().sum() == 0:
+            st.info(f'No {title} data for the selected period.')
+            return
+        fig = px.line(by_dc, x='minute', y=field, color='data_center', markers=False,
+                      color_discrete_map=COLORS,
+                      category_orders={'data_center':['DC1','DC2','DC3']})
+        fig.update_traces(line_width=3, connectgaps=False)
+        fig.update_layout(title=title, xaxis_title='Time', yaxis_title=axis,
+                          legend=dict(orientation='h',y=1.17,x=0), height=315)
+        fig.update_yaxes(rangemode='tozero', ticksuffix='%')
+        st.plotly_chart(style_plot(fig), width="stretch")
+
+    cpu_col, mem_col = st.columns(2, gap='medium')
+    with cpu_col:
+        dc_trend('cpu_percent','CPU Utilization by Data Center','CPU (%)')
+    with mem_col:
+        dc_trend('memory_percent','Memory Utilization by Data Center','Memory (%)')
+
+    latest_dc = (scoped.sort_values('timestamp').groupby('router').tail(1)
+                 .groupby('data_center')[['cpu_percent','memory_percent']].mean())
+    if not latest_dc.empty:
+        cpu_top = latest_dc['cpu_percent'].dropna()
+        mem_top = latest_dc['memory_percent'].dropna()
+        if not cpu_top.empty and not mem_top.empty:
+            st.caption(f'**Interpretation:** Highest latest average CPU: {cpu_top.idxmax()} ({cpu_top.max():.2f}%). '
+                       f'Highest latest average memory: {mem_top.idxmax()} ({mem_top.max():.2f}%). '
+                       'These are utilization comparisons, not fault alerts.')
+
+    st.subheader('🖥️ Router Deep Dive | CPU & Memory Side by Side')
+    router_focus = router if router != 'ALL' else (router_names[0] if router_names else None)
+    router_focus = st.selectbox('Router to analyze', router_names,
+                                index=router_names.index(router_focus) if router_focus in router_names else 0,
+                                key='focus_router')
+    router_history = trend_scope[trend_scope['router'] == router_focus].sort_values('timestamp')
+
+    def router_trend(field, label, color):
+        valid = router_history.dropna(subset=[field])
+        if valid.empty:
+            st.info(f'No {label} data for this period.')
+            return
+        fig = go.Figure()
+        valid = add_gaps(valid.assign(router=router_focus),'router','timestamp',[field])
+        fig.add_trace(go.Scatter(x=valid['timestamp'],y=valid[field], mode='lines',connectgaps=False,
+                                 name=label,line=dict(color=color,width=3),marker=dict(size=5),
+                                 fill='tozeroy',fillcolor='rgba(90,120,180,0.08)'))
+        fig.update_layout(title=f'{router_focus} · {label}',xaxis_title='Time',yaxis_title=f'{label} (%)',
+                          showlegend=False,height=300)
+        fig.update_yaxes(rangemode='tozero',ticksuffix='%')
+        st.plotly_chart(style_plot(fig),width="stretch")
+        clean = valid.dropna(subset=[field])
+        if not clean.empty:
+            st.caption(f'Latest {label.lower()}: **{clean.iloc[-1][field]:.2f}%** · '
+                       f'Peak in selected period: **{clean[field].max():.2f}%** · '
+                       f'Average: **{clean[field].mean():.2f}%**')
+
+    left,right=st.columns(2,gap='medium')
+    with left:
+        router_trend('cpu_percent','CPU','#38bdf8')
+    with right:
+        router_trend('memory_percent','Memory','#a78bfa')
+
+    st.subheader('📡 Network Traffic | Input & Output')
+    st.caption(f'{router_focus} · GigabitEthernet0/0 · Calculated throughput (Kbps) from successive counter readings; not interface capacity')
+    traffic = scoped[scoped['router'] == router_focus].sort_values('timestamp').copy()
+    traffic['seconds'] = traffic['timestamp'].diff().dt.total_seconds()
+    for direction in ('input','output'):
+        delta = traffic[f'{direction}_bytes'].diff()
+        traffic[f'{direction}_kbps'] = (delta * 8 / traffic['seconds'] / 1000).where(
+            (traffic['seconds'].between(5,180)) & (delta >= 0) & traffic[f'{direction}_bytes'].notna())
+    if history_limit in periods and not traffic.empty:
+        cutoff = traffic['timestamp'].max() - periods[history_limit]
+        traffic = traffic[traffic['timestamp'] >= cutoff]
+    traffic = add_gaps(traffic.assign(router=router_focus),'router','timestamp',['input_kbps','output_kbps'])
+    traffic_long = traffic.melt(id_vars='timestamp',value_vars=['input_kbps','output_kbps'],
+                                var_name='direction',value_name='kbps').dropna(subset=['kbps'])
+    if not traffic_long.empty:
+        traffic_long['direction'] = traffic_long['direction'].map({'input_kbps':'Input','output_kbps':'Output'})
+        # Retain NaN gap separators so Plotly does not connect disconnected sessions.
+        chart_traffic = traffic.melt(id_vars='timestamp',value_vars=['input_kbps','output_kbps'],var_name='direction',value_name='kbps')
+        chart_traffic['direction'] = chart_traffic['direction'].map({'input_kbps':'Input','output_kbps':'Output'})
+        fig=px.line(chart_traffic,x='timestamp',y='kbps',color='direction',markers=False,
+                    color_discrete_map={'Input':'#34d399','Output':'#fbbf24'})
+        fig.update_traces(line_width=3,connectgaps=False)
+        fig.update_layout(title='Interface Throughput Trend',xaxis_title='Time',yaxis_title='Kbps',
+                          legend=dict(orientation='h',y=1.17,x=0),height=340)
+        fig.update_yaxes(rangemode='tozero')
+        st.plotly_chart(style_plot(fig),width="stretch")
+        last_valid=traffic.dropna(subset=['input_kbps','output_kbps'])
+        if not last_valid.empty:
+            t=last_valid.iloc[-1]
+            x,y=st.columns(2)
+            x.metric('Latest Input Rate',f'{t["input_kbps"]:.2f} Kbps')
+            y.metric('Latest Output Rate',f'{t["output_kbps"]:.2f} Kbps')
+        st.caption('**Interpretation:** Green = received traffic; amber = transmitted traffic. '
+                   'Rates are derived from consecutive Gi0/0 byte-counter readings. '
+                   'Only 5–180 second valid intervals are used; counter resets and large sampling gaps are excluded. A peak is not automatically an incident.')
+    else:
+        st.info('At least two consecutive valid samples are required for traffic rates. Keep the collector running.')
+
+    # PHASE 1 — comparative traffic summary (no extra clicks).
+    st.markdown('#### 📊 Traffic Summary · selected router')
+    if not traffic_long.empty:
+        traffic_stats = traffic_long.groupby('direction')['kbps'].agg(['mean','max','last']).reindex(['Input','Output'])
+        t1,t2,t3,t4 = st.columns(4)
+        for widget, direction, statistic, label in [
+            (t1,'Input','mean','Average Input'), (t2,'Input','max','Peak Input'),
+            (t3,'Output','mean','Average Output'), (t4,'Output','max','Peak Output')]:
+            value = traffic_stats.loc[direction,statistic] if direction in traffic_stats.index else float('nan')
+            widget.metric(label, f'{value:.2f} Kbps' if pd.notna(value) else 'N/A')
+        st.caption('Throughput uses valid 5–180 s consecutive samples and counter deltas. Not interface utilization %. Gaps are not interpolated.')
+    else:
+        st.info('Traffic summary will appear after two valid sequential interface-counter samples.')
+
+    st.caption('**Monitoring note:** CPU is processor load; memory is used processor memory; '
+               'traffic is sampled throughput. Separate panels make trends easy to compare '
+               'without confusing utilization (%) with bandwidth (Kbps).')
+
+    # PHASE 2 — routing and ML intelligence, with visible summaries and no tab clicks.
+    st.divider()
+    st.subheader('🛡️ Network Intelligence | OSPF & BGP')
+    st.caption('Discovered peers from the most recent routing snapshot. Missing expected peers require a separate topology inventory.')
+    # Universal monitored-interface health, with explicitly reviewed UP/UP baseline.
+    st.subheader('🚨 All-DC Interface & Link Health | 12 Routers')
+    st.caption('Latest recorded interface states across all routers. Alerts compare against interface_inventory.csv; unmonitored ports do not create false alarms.')
+    iface = load_optional('interface_health.csv')
+    inv_path = ROOT / 'interface_inventory.csv'
+    required_iface = {'router','interface','admin_status','protocol_status','timestamp'}
+    if iface.empty or not required_iface.issubset(iface.columns):
+        st.info('Interface observations unavailable. Start: python .\\auto_routing_monitor.py')
+    else:
+        iface = iface.dropna(subset=['timestamp']).copy()
+        iface['interface'] = iface['interface'].astype(str).str.strip()
+        iface = iface[iface['router'].isin(ROUTERS)]
+        iface['data_center'] = iface['router'].astype(str).str.extract(r'^(DC[123])-', expand=False)
+        # Latest row per interface; never infer current status from historic snapshots.
+        latest_if = iface.sort_values('timestamp').drop_duplicates(['router','interface'], keep='last').copy()
+        latest_if['data_center'] = latest_if['router'].str.extract(r'^(DC[123])-')
+        latest_if['admin_status'] = latest_if['admin_status'].astype(str).str.lower().str.strip()
+        latest_if['protocol_status'] = latest_if['protocol_status'].astype(str).str.lower().str.strip()
+        latest_if['age_seconds'] = (pd.Timestamp.now() - latest_if['timestamp']).dt.total_seconds()
+        latest_if['fresh'] = latest_if['age_seconds'].between(0,300)
+        latest_if['link_up'] = (latest_if['admin_status']=='up') & (latest_if['protocol_status']=='up')
+        if inv_path.exists():
+            try:
+                inventory = pd.read_csv(inv_path).fillna('')
+                inventory['router'] = inventory['router'].astype(str).str.strip().str.upper()
+                inventory['interface'] = inventory['interface'].astype(str).str.strip()
+                inventory = inventory[inventory['monitor'].astype(str).str.lower().str.strip().isin(['yes','true','1'])]
+                inventory = inventory.drop_duplicates(['router','interface'],keep='last')
+                latest_if = latest_if.merge(inventory[['router','interface']].assign(expected=True), on=['router','interface'],how='left')
+                latest_if['expected'] = latest_if['expected'].fillna(False).astype(bool)
+                # Expected ports absent from latest readings must be UNKNOWN, not assumed UP.
+                missing = inventory[['router','interface']].merge(latest_if[['router','interface']],on=['router','interface'],how='left',indicator=True)
+                missing = missing[missing['_merge']=='left_only']
+            except (OSError, ValueError, KeyError, pd.errors.ParserError) as exc:
+                st.error(f'Invalid interface_inventory.csv: {exc}')
+                latest_if['expected'] = False
+                missing = pd.DataFrame()
+        else:
+            latest_if['expected'] = False
+            missing = pd.DataFrame()
+            st.warning('No reviewed interface inventory yet. Run `python setup_interface_baseline.py` after restoring intended links; review the generated CSV. Showing observed states only until then.')
+        latest_if['health'] = 'UNMONITORED'
+        latest_if.loc[latest_if['expected'] & latest_if['fresh'] & latest_if['link_up'], 'health'] = 'UP'
+        latest_if.loc[latest_if['expected'] & latest_if['fresh'] & ~latest_if['link_up'], 'health'] = 'DOWN'
+        latest_if.loc[latest_if['expected'] & ~latest_if['fresh'], 'health'] = 'STALE'
+        interface_scoped = latest_if if dc=='ALL' else latest_if[latest_if['data_center']==dc]
+        if router != 'ALL':
+            interface_scoped = interface_scoped[interface_scoped['router']==router]
+        down = interface_scoped[interface_scoped['health']=='DOWN']
+        stale = interface_scoped[interface_scoped['health']=='STALE']
+        healthy = interface_scoped[interface_scoped['health']=='UP']
+        unmonitored = interface_scoped[interface_scoped['health']=='UNMONITORED']
+        a1,a2,a3,a4 = st.columns(4)
+        a1.metric('Monitored UP',len(healthy))
+        a2.metric('Monitored DOWN',len(down))
+        a3.metric('Monitored STALE',len(stale))
+        a4.metric('Observed unmonitored',len(unmonitored))
+        if not down.empty:
+            st.error('🔴 INTERFACE FAILURE: ' + '; '.join(f"{r.router} {r.interface} ({r.admin_status}/{r.protocol_status})" for r in down.itertuples()))
+        if not stale.empty:
+            st.warning(f'{len(stale)} monitored interface readings are stale (>5 min). Collector may be stopped or router unreachable.')
+        if down.empty and stale.empty and not healthy.empty:
+            st.success('All freshly observed, monitored interfaces in this view are UP/UP.')
+        if not missing.empty:
+            missing = missing[missing['router'].str.startswith(dc+'-')] if dc!='ALL' else missing
+            if router!='ALL': missing=missing[missing['router']==router]
+            if not missing.empty:
+                st.warning(f'{len(missing)} inventoried interfaces have no observations; verify collection/inventory.')
+                st.dataframe(missing[['router','interface']],width="stretch",hide_index=True)
+        st.markdown('**All observed interfaces — latest reading**')
+        if not interface_scoped.empty:
+            display = interface_scoped[['data_center','router','interface','ip_address','admin_status','protocol_status','health','timestamp']].sort_values(['data_center','router','interface'])
+            st.dataframe(display.style.map(lambda v: 'color: #fb7185; font-weight: bold' if v=='DOWN' else ('color: #4ade80; font-weight: bold' if v=='UP' else ''),subset=['health']),width="stretch",hide_index=True,height=390)
+        with st.expander('Interface fault history (most recent 100 observations)'):
+            h = iface if dc=='ALL' else iface[iface['data_center']==dc]
+            if router!='ALL': h=h[h['router']==router]
+            st.dataframe(h.sort_values('timestamp',ascending=False).head(100),width="stretch",hide_index=True)
+        st.caption('Alert policy: only reviewed baseline interfaces are expected UP. Stale/unreachable data is UNKNOWN, not proof of link UP/DOWN. OSPF/BGP peer-loss inventory is a separate enhancement.')
+
+    routing = load_optional('routing_health.csv')
+    required_routing = {'router','protocol','peer','state','timestamp'}
+    if routing.empty or not required_routing.issubset(routing.columns):
+        st.info('Routing snapshot not available. Run: python .\\routing_collector_3DC.py')
+        legacy_ospf = load_optional('ospf_status.csv')
+        if not legacy_ospf.empty and 'router' in legacy_ospf.columns:
+            with st.expander('Older OSPF evidence (may cover DC1 only)'):
+                st.dataframe(legacy_ospf[legacy_ospf['router'].isin(selected['router'].unique())], width="stretch", hide_index=True)
+    else:
+        routing = routing[routing['router'].isin(selected['router'].unique())].copy()
+        routing = routing.dropna(subset=['timestamp']).sort_values('timestamp')
+        routing['protocol'] = routing['protocol'].astype(str).str.strip().str.upper()
+        routing['state'] = routing['state'].astype(str).str.strip().str.upper()
+        routing = routing.drop_duplicates(['router','protocol','peer'], keep='last')
+        if routing.empty:
+            st.info('No OSPF/BGP observations for the current router/DC filter.')
+        else:
+            snap_time = routing['timestamp'].max()
+            route_age = pd.Timestamp.now() - snap_time
+            route_fresh = pd.Timedelta(0) <= route_age <= pd.Timedelta(minutes=5)
+            if not route_fresh:
+                st.warning(f'Routing snapshot is not current: {snap_time:%Y-%m-%d %H:%M:%S}. Run routing collector again.')
+            ospf = routing[routing['protocol'].eq('OSPF')].copy()
+            bgp = routing[routing['protocol'].eq('BGP')].copy()
+            ospf_good = int(ospf['state'].str.startswith('FULL').sum())
+            bgp_good = int(bgp['state'].eq('ESTABLISHED').sum())
+            k1,k2,k3,k4 = st.columns(4)
+            k1.metric('OSPF FULL · observed', f'{ospf_good} / {len(ospf)}')
+            k2.metric('BGP Established · observed', f'{bgp_good} / {len(bgp)}')
+            k3.metric('Routing snapshot', snap_time.strftime('%H:%M:%S'))
+            k4.metric('Routing data', 'Current' if route_fresh else 'Stale')
+            left_route,right_route=st.columns(2,gap='medium')
+            def protocol_panel(df, protocol, healthy, color):
+                total=len(df)
+                ok=int(healthy.sum()) if total else 0
+                fig=go.Figure()
+                fig.add_trace(go.Bar(x=[protocol], y=[ok], name='Healthy observed',marker_color=color,text=[ok],textposition='inside'))
+                fig.add_trace(go.Bar(x=[protocol], y=[total-ok], name='Other observed',marker_color='#fb7185',text=[total-ok],textposition='inside'))
+                fig.update_layout(title=f'{protocol} · observed peer states', barmode='stack',height=265,
+                                  yaxis_title='Observed peers',legend=dict(orientation='h',y=-0.30))
+                fig.update_yaxes(dtick=1,rangemode='tozero')
+                st.plotly_chart(style_plot(fig),width="stretch")
+                if total:
+                    view=[c for c in ['router','peer','state','detail','timestamp'] if c in df.columns]
+                    st.dataframe(df[view],width="stretch",hide_index=True,height=230)
+                else:
+                    st.info(f'No {protocol} peer rows discovered for this selection.')
+            with left_route:
+                protocol_panel(ospf,'OSPF',ospf['state'].str.startswith('FULL'),'#34d399')
+            with right_route:
+                protocol_panel(bgp,'BGP',bgp['state'].eq('ESTABLISHED'),'#38bdf8')
+            st.caption('OSPF FULL and BGP Established indicate observed protocol states, not end-to-end service availability. Counts exclude peers missing from collection.')
+            with st.expander('Routing collection evidence · all discovered rows'):
+                st.dataframe(routing.sort_values(['protocol','router','peer']),width="stretch",hide_index=True)
+
+with tab_ml:
+
+    st.divider()
+    st.subheader('🧠 AI / ML Intelligence | Anomaly Monitoring')
+    st.caption('ML decisions are read from ml_results.csv. Run auto_ml_monitor.py separately for periodic evaluation; anomalies are statistical signals, not confirmed faults.')
+    ml = load_optional('ml_results.csv')
+    required_ml={'router','anomaly_status'}
+    if ml.empty or not required_ml.issubset(ml.columns):
+        st.info('ML results not available. Run: python .\\ml_detection_3DC_auto.py')
+    else:
+        ml = ml[ml['router'].isin(selected['router'].unique())].copy()
+        if ml.empty:
+            st.info('No ML records for selected routers. Check whether the ML script covers DC2 and DC3.')
+        else:
+            if 'timestamp' in ml.columns:
+                ml=ml.sort_values('timestamp')
+                latest_ml=ml.drop_duplicates('router',keep='last')
+            else:
+                latest_ml=ml.drop_duplicates('router',keep='last')
+            flagged_latest=latest_ml['anomaly_status'].astype(str).str.strip().str.lower().eq('anomaly')
+            normal_latest=latest_ml['anomaly_status'].astype(str).str.strip().str.lower().eq('normal')
+            m1,m2,m3,m4=st.columns(4)
+            m1.metric('Latest flagged routers',int(flagged_latest.sum()))
+            m2.metric('Routers with ML result',f'{latest_ml["router"].nunique()} / {selected["router"].nunique()}')
+            m3.metric('Latest ML result',latest_ml['timestamp'].max().strftime('%H:%M:%S') if 'timestamp' in latest_ml and latest_ml['timestamp'].notna().any() else 'Unknown')
+            m4.metric('Latest normal',int(normal_latest.sum()))
+            pending=int((~(flagged_latest | normal_latest)).sum())
+            if pending:
+                st.warning(f'{pending} router(s) have NO_DATA or INSUFFICIENT_DATA. These are not classified as healthy.')
+            if 'timestamp' in ml and ml['timestamp'].notna().any():
+                latest_ml_time=ml['timestamp'].max()
+                ml_age=pd.Timestamp.now()-latest_ml_time
+                if not (pd.Timedelta(0)<=ml_age<=pd.Timedelta(minutes=5)):
+                    st.warning(f'ML results may be stale: latest {latest_ml_time:%Y-%m-%d %H:%M:%S}.')
+            ml_left,ml_right=st.columns([1.15,1],gap='medium')
+            with ml_left:
+                st.markdown('**ML Exception Timeline**')
+                if 'timestamp' in ml:
+                    flagged=ml[ml['anomaly_status'].astype(str).str.strip().str.lower().eq('anomaly')].dropna(subset=['timestamp'])
+                    if not flagged.empty:
+                        fig=px.scatter(flagged,x='timestamp',y='router',color='router',
+                                       hover_data=['anomaly_status'],title='Flagged observations by time',color_discrete_sequence=RAINBOW)
+                        fig.update_traces(marker=dict(size=12,symbol='diamond'))
+                        st.plotly_chart(style_plot(fig),width="stretch")
+                    else:
+                        st.info('No anomaly-labeled records in the available ML file.')
+                else:
+                    st.info('Timeline needs a timestamp column in ml_results.csv.')
+            with ml_right:
+                st.markdown('**Latest Router-Level ML Decisions**')
+                show=[c for c in ['timestamp','router','anomaly_status','anomaly_score','anomaly_reason','samples_used','features_used'] if c in latest_ml.columns]
+                st.dataframe(latest_ml[show].sort_values('router'),width="stretch",hide_index=True,height=290)
+            st.caption('Model scope: per-router Isolation Forest with >=20 valid samples. Anomaly reason indicates the most deviant feature, not a proven root cause. No flagged record does not prove incident-free operation.')
+
+    with st.expander('Latest router-level evidence'):
+        st.dataframe(latest[['timestamp','data_center','router','cpu_percent','memory_percent','input_bytes','output_bytes']].sort_values(['data_center','router']),width="stretch",hide_index=True)
+
+    st.divider()
+    st.caption('BITS Pilani | Design & Operation of Data Centers | EVE-NG Practical | Metrics are sampled lab evidence, not production SLA measurements')
+    # ---- ML Intelligence Phase 1-4: history, forecast, heuristic risk, correlation, validation ----
+    st.divider()
+    st.subheader('🧠 Advanced ML Intelligence | 3-DC Decision Support')
+    st.caption('Read-only results generated by ml_intelligence_3DC.py. Forecasts are simple trend estimates; risk scores are heuristic, not ML failure probabilities.')
+    mlhist=load_optional('ml_history.csv')
+    mlfc=load_optional('ml_forecast.csv')
+    mlrisk=load_optional('dc_risk_scores.csv')
+    mlcorr=load_optional('ml_fault_correlation.csv')
+    mleval=load_optional('ml_model_evaluation.csv')
+    if mlhist.empty:
+        st.info('Start the enhanced ML engine: python .\\ml_intelligence_3DC.py; then python .\\auto_ml_intelligence_3DC.py --interval 60')
+    else:
+        if dc!='ALL':
+            mlhist=mlhist[mlhist['router'].astype(str).str.startswith(dc+'-')]
+        if router!='ALL':
+            mlhist=mlhist[mlhist['router']==router]
+        if 'evaluated_at' in mlhist:
+            mlhist['evaluated_at']=pd.to_datetime(mlhist['evaluated_at'],errors='coerce')
+            mlhist=mlhist.dropna(subset=['evaluated_at'])
+        if not mlhist.empty:
+            st.markdown('**Historical ML anomalies & severity**')
+            exceptions=mlhist[mlhist['anomaly_status'].eq('Anomaly')]
+            if not exceptions.empty:
+                fig=px.scatter(exceptions,x='evaluated_at',y='router',color='severity' if 'severity' in exceptions else 'router',
+                               hover_data=['anomaly_score','anomaly_reason'],title='Historical flagged ML cycles')
+                st.plotly_chart(style_plot(fig),width="stretch")
+            else:
+                st.info('No anomalies in saved enhanced ML cycles yet; history is retained for future cycles.')
+            a,b,c=st.columns(3)
+            a.metric('Saved ML cycles',mlhist['evaluated_at'].nunique() if 'evaluated_at' in mlhist else 0)
+            b.metric('Historical flagged decisions',len(exceptions))
+            c.metric('High-severity decisions',int(mlhist['severity'].eq('HIGH').sum()) if 'severity' in mlhist else 0)
+            with st.expander('Historical ML observations',expanded=False):
+                st.dataframe(mlhist.sort_values('evaluated_at',ascending=False).head(500),hide_index=True,width="stretch")
+
+    left_ai,right_ai=st.columns(2,gap='large')
+    with left_ai:
+        st.markdown('**5-minute CPU / Memory Trend Forecast**')
+        if mlfc.empty:
+            st.info('No forecasts yet. Run the enhanced ML engine.')
+        else:
+            if dc!='ALL': mlfc=mlfc[mlfc.router.astype(str).str.startswith(dc+'-')]
+            if router!='ALL': mlfc=mlfc[mlfc.router==router]
+            valid_fc=mlfc[mlfc.status.eq('FORECAST')].copy()
+            if not valid_fc.empty:
+                fig=px.bar(valid_fc,x='router',y='prediction',color='metric',barmode='group',
+                           hover_data=['current','mae_backtest','n_samples'],title='Forecast utilization (%)')
+                st.plotly_chart(style_plot(fig),width="stretch")
+            st.dataframe(mlfc[['router','metric','current','prediction','mae_backtest','status']],hide_index=True,width="stretch")
+            st.caption('Chronological holdout MAE is a diagnostic; trend extrapolation is not guaranteed accurate.')
+    with right_ai:
+        st.markdown('**DC Operational Risk Ranking**')
+        if mlrisk.empty:
+            st.info('No risk scores yet.')
+        else:
+            if dc!='ALL': mlrisk=mlrisk[mlrisk.dc.eq(dc)]
+            fig=px.bar(mlrisk,x='dc',y='risk_score',color='dc',range_y=[0,100],
+                       hover_data=['ml_anomalies','down_links','ml_unknown','unverified_routers'],
+                       title='Heuristic operational risk / 100')
+            st.plotly_chart(style_plot(fig),width="stretch")
+            st.dataframe(mlrisk,hide_index=True,width="stretch")
+            st.caption('Score: 15/anomaly + 30/down link (max 2) + 10/ML unknown + 5/unverified router; capped at 100. Not a probability.')
+    st.markdown('**ML ↔ Network Fault Correlation**')
+    if mlcorr.empty:
+        st.info('Correlation unavailable. Requires interface_inventory.csv and fresh interface_health.csv for validated link status.')
+    else:
+        if dc!='ALL': mlcorr=mlcorr[mlcorr.router.astype(str).str.startswith(dc+'-')]
+        if router!='ALL': mlcorr=mlcorr[mlcorr.router==router]
+        highlighted=mlcorr[mlcorr.correlation.isin(['CORRELATED','NETWORK_FAULT','ML_ONLY'])]
+        if not highlighted.empty:
+            st.warning(f'{len(highlighted)} router(s) require investigation; co-occurrence does not prove causation.')
+        st.dataframe(mlcorr,hide_index=True,width="stretch")
+    st.markdown('**Offline Synthetic Stress Test — Model Evaluation**')
+    if mleval.empty:
+        st.info('Run once: python .\\run_ml_synthetic_test.py (uses copied held-out samples; does not touch routers).')
+    else:
+        if dc!='ALL': mleval=mleval[mleval.router.astype(str).str.startswith(dc+'-')]
+        if router!='ALL': mleval=mleval[mleval.router==router]
+        st.dataframe(mleval,hide_index=True,width="stretch")
+        st.caption('Precision/recall/FPR are based on injected synthetic CPU or memory spikes, NOT labeled production incidents. No measured real-world detection latency.')
+
+
+    # ---- Model validation, operational triage and historical insights ----
+    st.divider()
+    st.subheader('📊 ML Validation & Operational Explainability')
+    st.caption('Synthetic tests are offline experiments; metrics are not real-world detection accuracy. Trend forecasts are not trained failure predictors.')
+
+    if not mleval.empty and {'tp','fp','tn','fn'}.issubset(mleval.columns):
+        valid_eval=mleval.copy()
+        if dc!='ALL' and 'router' in valid_eval: valid_eval=valid_eval[valid_eval.router.astype(str).str.startswith(dc+'-')]
+        if router!='ALL' and 'router' in valid_eval: valid_eval=valid_eval[valid_eval.router.eq(router)]
+        if not valid_eval.empty:
+            tp,fp,tn,fn=[int(pd.to_numeric(valid_eval[k],errors='coerce').fillna(0).sum()) for k in ('tp','fp','tn','fn')]
+            precision=tp/(tp+fp) if tp+fp else None
+            recall=tp/(tp+fn) if tp+fn else None
+            f1=2*precision*recall/(precision+recall) if precision is not None and recall is not None and (precision+recall)>0 else None
+            fpr=fp/(fp+tn) if fp+tn else None
+            k1,k2,k3,k4=st.columns(4)
+            for col,label,val in [(k1,'Synthetic Precision',precision),(k2,'Synthetic Recall',recall),(k3,'Synthetic F1',f1),(k4,'False Positive Rate',fpr)]:
+                col.metric(label,f'{val:.1%}' if val is not None else 'N/A')
+            cm=go.Figure(data=go.Heatmap(z=[[tn,fp],[fn,tp]],x=['Predicted Normal','Predicted Anomaly'],y=['Actual Normal','Injected Stress'],
+                                        colorscale=[[0,'#1e3a5f'],[1,'#38bdf8']],text=[[tn,fp],[fn,tp]],texttemplate='%{text}',
+                                        textfont={'size':22},showscale=False))
+            cm.update_layout(title='Offline Synthetic Confusion Matrix',height=330)
+            st.plotly_chart(style_plot(cm),width="stretch")
+            st.caption('Stress cases are injected into held-out copies of metrics. True labels refer only to injected samples, not confirmed Cisco faults.')
+    else:
+        st.info('No synthetic evaluation CSV yet. Run: python .\run_ml_synthetic_test.py')
+
+    if not mlhist.empty and {'evaluated_at','router','anomaly_status'}.issubset(mlhist.columns):
+        st.markdown('**24-hour Anomaly Frequency & Top Affected Routers**')
+        h=mlhist.copy()
+        h['evaluated_at']=pd.to_datetime(h.evaluated_at,errors='coerce')
+        h=h.dropna(subset=['evaluated_at'])
+        if not h.empty:
+            cutoff=h.evaluated_at.max()-pd.Timedelta(hours=24)
+            h=h[h.evaluated_at.ge(cutoff)]
+            anomalies=h[h.anomaly_status.astype(str).str.lower().eq('anomaly')]
+            a,b=st.columns(2,gap='large')
+            with a:
+                if not anomalies.empty:
+                    hourly=anomalies.assign(hour=anomalies.evaluated_at.dt.floor('h')).groupby('hour').size().reset_index(name='flagged_decisions')
+                    fig=px.bar(hourly,x='hour',y='flagged_decisions',title='Flagged ML decisions by hour')
+                    st.plotly_chart(style_plot(fig),width="stretch")
+                else: st.info('No flagged decisions in the latest saved 24-hour window.')
+            with b:
+                if not anomalies.empty:
+                    counts=anomalies.groupby('router').size().reset_index(name='flags').sort_values('flags',ascending=False).head(12)
+                    fig=px.bar(counts,x='router',y='flags',title='Routers with most flagged decisions')
+                    st.plotly_chart(style_plot(fig),width="stretch")
+                else: st.info('Top affected routers will appear after flagged cycles are recorded.')
+            st.caption('Counts are flagged evaluation cycles, not distinct confirmed incidents. Consecutive flags may represent one event.')
+
+    if not mlfc.empty and {'router','metric','current','prediction','status'}.issubset(mlfc.columns):
+        st.markdown('**Actual Latest vs 5-minute Estimated Utilization**')
+        f=mlfc[mlfc.status.eq('FORECAST')].copy()
+        if dc!='ALL': f=f[f.router.astype(str).str.startswith(dc+'-')]
+        if router!='ALL': f=f[f.router.eq(router)]
+        if not f.empty:
+            f['current']=pd.to_numeric(f.current,errors='coerce')
+            f['prediction']=pd.to_numeric(f.prediction,errors='coerce')
+            long=f.melt(id_vars=['router','metric'],value_vars=['current','prediction'],var_name='measurement',value_name='utilization_pct')
+            fig=px.bar(long,x='router',y='utilization_pct',color='measurement',facet_row='metric',barmode='group',
+                       title='Current observed value vs trend-based estimate (%)')
+            fig.update_layout(height=560)
+            st.plotly_chart(style_plot(fig),width="stretch")
+            st.caption('This compares current observations with future estimates, NOT actual future measurements. Forecast accuracy requires later matching observations.')
+
+    if not mlcorr.empty and {'router','correlation','recommendation'}.issubset(mlcorr.columns):
+        st.markdown('**Actionable Incident Triage — ML + Network Evidence**')
+        c=mlcorr.copy()
+        if dc!='ALL': c=c[c.router.astype(str).str.startswith(dc+'-')]
+        if router!='ALL': c=c[c.router.eq(router)]
+        flagged=c[c.correlation.isin(['CORRELATED','NETWORK_FAULT','ML_ONLY','UNVERIFIED'])].copy()
+        if flagged.empty:
+            st.success('No active correlated / ML-only / network-fault indicators in the available snapshot. Check telemetry freshness separately.')
+        else:
+            priority={'CORRELATED':0,'NETWORK_FAULT':1,'ML_ONLY':2,'UNVERIFIED':3}
+            flagged['priority']=flagged.correlation.map(priority)
+            flagged=flagged.sort_values(['priority','router']).drop(columns=['priority'])
+            st.dataframe(flagged,hide_index=True,width="stretch")
+            st.caption('Correlation means co-occurrence only. Interface faults require reviewed inventory; missing OSPF/BGP peers need expected-peer inventory.')
+
+    st.caption('ML-based Distributed Cloud Data Center Management | Decision support: all values are sampled lab telemetry; not production SLA or real incident classification.')
+
+# ================================================================
+# WAN BGP & ML CORRELATION — THIRD INDEPENDENT DASHBOARD TAB
+# CSV input is read-only. Run collectors in separate terminals.
+# ================================================================
+with tab_wan:
+    st.divider()
+    st.header("🌍 WAN BGP Monitoring | Failure, Recovery & ML Correlation")
+    st.caption(
+        "Two monitored WAN devices • BGP session health • timestamped events "
+        "• independent 12-router ML results. Read-only CSV evidence."
+    )
+
+    # This dashboard's existing load_optional() caches CSVs for 10 seconds.
+    bgp_wan = load_optional("wan_bgp_peer_health.csv")
+    wan_events = load_optional("wan_bgp_events.csv")
+    wan_corr = load_optional("wan_ml_correlation.csv")
+    wan_ml = load_optional("ml_results.csv")
+
+    peer_columns = {"timestamp", "router", "neighbor_ip", "bgp_status", "collection_status"}
+    if bgp_wan.empty or not peer_columns.issubset(bgp_wan.columns):
+        st.warning("WAN BGP peer data missing or invalid: wan_bgp_peer_health.csv")
+        st.code("python .\\wan_bgp_monitor.py")
+    else:
+        bgp_wan = bgp_wan.dropna(subset=["timestamp"]).copy()
+        if bgp_wan.empty:
+            st.warning("WAN peer CSV has no valid timestamps.")
+        else:
+            # Latest observation PER PEER (not an arbitrary last five rows).
+            bgp_wan["router"] = bgp_wan["router"].astype(str).str.strip()
+            bgp_wan["neighbor_ip"] = bgp_wan["neighbor_ip"].astype(str).str.strip()
+            bgp_wan = bgp_wan.sort_values("timestamp", kind="stable")
+            peer_latest = bgp_wan.drop_duplicates(
+                ["router", "neighbor_ip"], keep="last"
+            ).copy()
+            for name in ("bgp_status", "collection_status", "error"):
+                if name not in peer_latest.columns:
+                    peer_latest[name] = ""
+                peer_latest[name] = peer_latest[name].fillna("").astype(str).str.strip()
+            peer_latest["healthy"] = (
+                peer_latest["bgp_status"].str.upper().eq("ESTABLISHED")
+                & peer_latest["collection_status"].str.upper().eq("SUCCESS")
+                & peer_latest["error"].eq("")
+            )
+            peer_latest["age_sec"] = (
+                pd.Timestamp.now() - peer_latest["timestamp"]
+            ).dt.total_seconds()
+            # A 5-minute threshold is an operator-facing freshness indicator;
+            # it does not change the recorded BGP session state.
+            peer_latest["fresh"] = peer_latest["age_sec"].between(0, 300)
+            peer_latest["verified_healthy"] = peer_latest["healthy"] & peer_latest["fresh"]
+            n_all = len(peer_latest)
+            n_up = int(peer_latest["healthy"].sum())
+            n_fresh_up = int(peer_latest["verified_healthy"].sum())
+            n_unreachable = int(peer_latest["collection_status"].str.upper().ne("SUCCESS").sum())
+
+            if not wan_events.empty and "event" in wan_events.columns:
+                event_type = wan_events["event"].fillna("").astype(str).str.upper().str.strip()
+                n_fail = int(event_type.eq("FAILURE").sum())
+                n_recover = int(event_type.eq("RECOVERY").sum())
+            else:
+                n_fail, n_recover = 0, 0
+
+            a, b, c, d, e = st.columns(5)
+            a.metric("Recorded BGP Up", f"{n_up}/{n_all}")
+            b.metric("Fresh + Up (≤5 min)", f"{n_fresh_up}/{n_all}")
+            c.metric("Collection Errors", n_unreachable)
+            d.metric("Failure Events", n_fail)
+            e.metric("Recovery Events", n_recover)
+            st.caption("Last recorded WAN poll: " + str(bgp_wan["timestamp"].max()))
+            if n_fresh_up == n_all:
+                st.success("All monitored peer observations are established and fresh.")
+            elif n_up == n_all:
+                st.warning("All last-observed peer states are established, but some observations are stale.")
+            else:
+                st.warning("At least one expected peer is down, missing, or unverified. Review the table below.")
+
+            st.subheader("BGP Neighbors — Latest Observation Per Peer")
+            show_peer = [c for c in [
+                "router", "neighbor_ip", "local_as", "remote_as", "session_type",
+                "bgp_status", "prefix_count", "session_uptime", "collection_status",
+                "fresh", "timestamp", "error"
+            ] if c in peer_latest.columns]
+            st.dataframe(peer_latest[show_peer].sort_values(["router", "neighbor_ip"]),
+                         width="stretch", hide_index=True)
+            st.caption("WAN-CORE1↔WAN-CORE2 was observed as eBGP (AS 65000 vs 65100), "
+                       "not iBGP. ISP-2 is the Cisco hostname for the monitored WAN-CORE2 device.")
+
+            st.subheader("BGP Recorded Peer History")
+            history = bgp_wan.copy()
+            if "bgp_status" in history.columns:
+                history["up_value"] = history["bgp_status"].astype(str).str.upper().eq("ESTABLISHED").astype(int)
+                history["peer"] = history["router"].astype(str) + " → " + history["neighbor_ip"].astype(str)
+                fig = px.line(history, x="timestamp", y="up_value", color="peer",
+                              markers=True, title="Observed BGP State (1 = Established, 0 = Other)")
+                fig.update_yaxes(range=[-0.1, 1.15], tickvals=[0, 1],
+                                 ticktext=["Other", "Established"])
+                st.plotly_chart(style_plot(fig), width="stretch")
+                st.caption("Collection errors and missing snapshots may also appear as 0; "
+                           "inspect collection_status to distinguish unknown state from BGP down.")
+
+    st.divider()
+    st.subheader("🚨 BGP Failure & Recovery Timeline")
+    if wan_events.empty or not {"timestamp", "router", "neighbor_ip", "event"}.issubset(wan_events.columns):
+        st.info("No usable event history found. Run: python .\\wan_bgp_event_detector.py")
+    else:
+        events_view = wan_events.dropna(subset=["timestamp"]).copy()
+        events_view["event"] = events_view["event"].astype(str).str.upper()
+        events_view["peer"] = events_view["router"].astype(str) + " → " + events_view["neighbor_ip"].astype(str)
+        if not events_view.empty:
+            fig = px.scatter(events_view, x="timestamp", y="peer", color="event",
+                             color_discrete_map={"FAILURE": "#fb7185", "RECOVERY": "#34d399"},
+                             title="Confirmed Observed State Transitions", symbol="event")
+            fig.update_traces(marker_size=13)
+            st.plotly_chart(style_plot(fig), width="stretch")
+            st.dataframe(events_view.sort_values("timestamp", ascending=False).drop(columns=["peer"]),
+                         width="stretch", hide_index=True)
+        else:
+            st.info("Event file has no valid timestamps.")
+    st.caption("Event timestamps represent detection in collected observations, "
+               "not measured network convergence or end-to-end traffic restoration time.")
+
+    st.divider()
+    st.subheader("🧠 Data Center ML Health — Latest Evaluation")
+    if wan_ml.empty or not {"router", "anomaly_status"}.issubset(wan_ml.columns):
+        st.info("ML results unavailable: ml_results.csv")
+    else:
+        wan_ml = wan_ml[wan_ml["router"].isin(ROUTERS)].copy()
+        sort_time = "evaluated_at" if "evaluated_at" in wan_ml.columns else "timestamp"
+        if sort_time in wan_ml.columns:
+            wan_ml[sort_time] = pd.to_datetime(wan_ml[sort_time], errors="coerce")
+            wan_ml = wan_ml.sort_values(sort_time).drop_duplicates("router", keep="last")
+        else:
+            wan_ml = wan_ml.drop_duplicates("router", keep="last")
+        statuses = wan_ml["anomaly_status"].fillna("").astype(str).str.upper().str.strip()
+        normal = int(statuses.eq("NORMAL").sum())
+        anomalous = int(statuses.eq("ANOMALY").sum())
+        unknown = int((~statuses.isin(["NORMAL", "ANOMALY"])).sum())
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Routers Evaluated", f"{len(wan_ml)}/12")
+        m2.metric("Normal", normal)
+        m3.metric("ML Anomalies", anomalous)
+        m4.metric("Insufficient / Unknown", unknown)
+        view_cols = [c for c in ["router", "anomaly_status", "anomaly_score",
+                                 "samples_used", "features_used", "severity", "evaluated_at"]
+                     if c in wan_ml.columns]
+        st.dataframe(wan_ml[view_cols].sort_values("router"), width="stretch", hide_index=True)
+        if sort_time in wan_ml.columns and wan_ml[sort_time].notna().any():
+            st.caption(f"Latest ML evaluation recorded: {wan_ml[sort_time].max()}")
+        st.caption("Insufficient-data devices are not counted as Normal. "
+                   "A BGP session failure need not produce a CPU/memory traffic-model anomaly.")
+
+    st.divider()
+    st.subheader("🔗 WAN BGP ↔ ML Time-Window Correlation")
+    if wan_corr.empty or not {"wan_router", "bgp_event", "correlation"}.issubset(wan_corr.columns):
+        st.info("Correlation evidence unavailable. Run: python .\\wan_ml_correlation.py")
+    else:
+        st.dataframe(wan_corr, width="stretch", hide_index=True)
+        corr_counts = wan_corr["correlation"].fillna("UNKNOWN").value_counts().rename_axis("result").reset_index(name="records")
+        st.bar_chart(corr_counts.set_index("result")["records"])
+        st.caption("NO_CONFIRMED_ML_MATCH means no matching anomaly was found in available data; "
+                   "it does not establish fault absence. Temporal coincidence is not causation. "
+                   "Validate timestamp bases and sample freshness before drawing conclusions.")
+
+    with st.expander("How to refresh WAN data and capture assignment evidence"):
+        st.code(
+            "python .\\wan_bgp_monitor.py\n"
+            "python .\\wan_bgp_event_detector.py\n"
+            "python .\\wan_ml_correlation.py",
+            language="powershell",
+        )
+        st.caption("Run the scripts in PowerShell from DC_ML_Project. "
+                   "For periodic WAN collection use: python .\\wan_bgp_monitor.py --interval 60. "
+                   "The dashboard only reads CSVs; it does not manage router state.")
+
+# Keep the existing automatic refresh available on all three tabs.
+if refresh:
+    time.sleep(30)
+    st.rerun()
+
+
+
+
+

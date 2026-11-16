@@ -1,0 +1,13 @@
+timestamp,router,anomaly_score,samples_used,model_scope,evaluated_at,cpu_percent,memory_percent,input_kbps,output_kbps,anomaly_status,anomaly_reason,features_used,severity
+2026-11-01T14:53:08,DC1-SPINE1,0.091871,241,per-router,2026-11-01T14:55:02,14.0,7.72,0.07015384615384615,0.1716923076923077,Normal,No anomaly flagged,"cpu_percent, memory_percent, input_kbps, output_kbps",NONE
+2026-11-01T14:53:11,DC1-SPINE2,0.05593,234,per-router,2026-11-01T14:55:02,2.0,7.73,0.17025641025641025,0.09476923076923077,Normal,No anomaly flagged,"cpu_percent, memory_percent, input_kbps, output_kbps",NONE
+2026-11-01T14:53:01,DC1-LEAF1,0.099903,245,per-router,2026-11-01T14:55:02,11.0,7.39,0.1383157894736842,0.096,Normal,No anomaly flagged,"cpu_percent, memory_percent, input_kbps, output_kbps",NONE
+2026-11-01T14:53:05,DC1-LEAF2,0.089352,232,per-router,2026-11-01T14:55:02,22.0,7.39,0.1357948717948718,0.1878974358974359,Normal,No anomaly flagged,"cpu_percent, memory_percent, input_kbps, output_kbps",NONE
+2026-11-01T14:53:14,DC2-SPINE1,0.149159,242,per-router,2026-11-01T14:55:02,3.0,7.72,0.1366153846153846,0.17374358974358975,Normal,No anomaly flagged,"cpu_percent, memory_percent, input_kbps, output_kbps",NONE
+2026-11-01T14:53:17,DC2-SPINE2,0.148468,248,per-router,2026-11-01T14:55:02,5.0,7.72,0.057846153846153846,0.17374358974358975,Normal,No anomaly flagged,"cpu_percent, memory_percent, input_kbps, output_kbps",NONE
+2026-11-01T14:53:21,DC2-LEAF1,0.16828,240,per-router,2026-11-01T14:55:02,3.0,7.39,0.1334,0.1692,Normal,No anomaly flagged,"cpu_percent, memory_percent, input_kbps, output_kbps",NONE
+2026-11-01T14:53:25,DC2-LEAF2,0.11754,238,per-router,2026-11-01T14:55:02,8.0,7.39,0.05502439024390244,0.16507317073170732,Normal,No anomaly flagged,"cpu_percent, memory_percent, input_kbps, output_kbps",NONE
+2026-11-01T14:53:28,DC3-SPINE1,0.090937,242,per-router,2026-11-01T14:55:02,16.0,7.72,0.05502439024390244,0.18185365853658536,Normal,No anomaly flagged,"cpu_percent, memory_percent, input_kbps, output_kbps",NONE
+2026-11-01T14:53:31,DC3-SPINE2,0.104245,241,per-router,2026-11-01T14:55:02,14.0,7.72,0.0564,0.0924,Normal,No anomaly flagged,"cpu_percent, memory_percent, input_kbps, output_kbps",NONE
+2026-11-01T14:53:34,DC3-LEAF1,0.09305,246,per-router,2026-11-01T14:55:02,12.0,7.39,0.047,0.092,Normal,No anomaly flagged,"cpu_percent, memory_percent, input_kbps, output_kbps",NONE
+2026-11-01T14:53:37,DC3-LEAF2,0.096003,244,per-router,2026-11-01T14:55:02,4.0,7.39,0.047,0.11975,Normal,No anomaly flagged,"cpu_percent, memory_percent, input_kbps, output_kbps",NONE

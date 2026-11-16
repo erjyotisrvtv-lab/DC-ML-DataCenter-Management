@@ -1,0 +1,5 @@
+router,valid_samples,anomalies,status
+LEAF1,225,15,Trained
+LEAF2,224,18,Trained
+SPINE1,224,16,Trained
+SPINE2,224,18,Trained

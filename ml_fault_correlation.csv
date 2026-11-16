@@ -1,0 +1,13 @@
+router,correlation,ml_status,monitored_down,unknown_interfaces,failed_interfaces,nonhealthy_observed_routing,recommendation
+DC1-SPINE1,NO_FLAG,Normal,0,0,,,Continue monitoring; this is not a guarantee of health
+DC1-SPINE2,NO_FLAG,Normal,0,0,,,Continue monitoring; this is not a guarantee of health
+DC1-LEAF1,NO_FLAG,Normal,0,0,,,Continue monitoring; this is not a guarantee of health
+DC1-LEAF2,NO_FLAG,Normal,0,0,,,Continue monitoring; this is not a guarantee of health
+DC2-SPINE1,NO_FLAG,Normal,0,0,,,Continue monitoring; this is not a guarantee of health
+DC2-SPINE2,NO_FLAG,Normal,0,0,,,Continue monitoring; this is not a guarantee of health
+DC2-LEAF1,NO_FLAG,Normal,0,0,,,Continue monitoring; this is not a guarantee of health
+DC2-LEAF2,NO_FLAG,Normal,0,0,,,Continue monitoring; this is not a guarantee of health
+DC3-SPINE1,NO_FLAG,Normal,0,0,,,Continue monitoring; this is not a guarantee of health
+DC3-SPINE2,NO_FLAG,Normal,0,0,,,Continue monitoring; this is not a guarantee of health
+DC3-LEAF1,NO_FLAG,Normal,0,0,,,Continue monitoring; this is not a guarantee of health
+DC3-LEAF2,NO_FLAG,Normal,0,0,,,Continue monitoring; this is not a guarantee of health
